@@ -2,13 +2,16 @@ import System.IO
 import System.Environment
 import System.Random
 
--------   Workaround, so program does not wait for return ('\n' or '\r') when reading single char
+-------   Workaround from getChar, so program does not wait for return ('\n' or '\r') when reading single char
 import Data.Char
 import Foreign.C.Types
 getHiddenChar = fmap (chr.fromEnum) c_getch
 foreign import ccall unsafe "conio.h getch"
   c_getch :: IO CInt
 -------
+
+debugMode :: Bool
+debugMode = False -- enables debugging output
 
 type Line = [Char]
 type CodeMap = [Line]
@@ -102,9 +105,9 @@ data RV =
 -- Runtime = 0: Code, 1: Stacks, 2: Instruction Pointer, 3: isRunning, 4: ignoreNextInstruction, 5: randNum(0,3), 6: ioOperation, 7: Processing mode
 type Runtime = [RV]
 
-----------------------------------------
+--------------------------------------------------------------------------------
 
----- GETTERS AND SETTERS ----
+---- GETTERS AND SETTERS FOR RUNTIME ----
 getFromRuntime :: Int -> Runtime -> RV
 getFromRuntime i runtime = runtime !! i
 
@@ -191,12 +194,10 @@ popNValues n ((xx, r):ss) =
 pushValues :: [Value] -> Stacks -> Stacks
 pushValues values ((xx, r):ss) = ((values ++ xx, r):ss)
 
-----------------------------------------
+--------------------------------------------------------------------------------
 
+errorMessage :: String
 errorMessage = "something smells fishy..."
-
--- True for activating debuging texts
-debugMode = False
 
 debug :: String -> IO ()
 debug str = 
@@ -204,6 +205,7 @@ debug str =
     then (if not . null $ str then putStr "[DEBUG] " else return ()) >> putStrLn str 
     else return ()
 
+main :: IO ()
 main = do
     args <- getArgs
     case args of
@@ -218,14 +220,17 @@ parseInput str =
     let line = takeWhile (/= '\n') str
     in line : parseInput (drop (length line +1) str)
 
+-- makes all lines equal length with 'extendLines' function
 adjustCode :: [String] -> Code
 adjustCode lines =
     let width = foldl (\ll x -> max (length x) ll) 0 lines -- longest line
     in (map (extendLines width) lines, width, length lines)
 
+-- extends line by adding '\0' to a certain length
 extendLines :: Int -> Line -> Line
 extendLines l line = line ++ replicate (l - length line) '\0'
 
+-- adds empty ['\0'] lines 
 addLines :: Int -> Int -> [Line]
 addLines count width = replicate count (replicate width '\0')
 
@@ -242,9 +247,9 @@ process filePath = do
 
     debug "Finished"
 
-----------------------------------------
+--------------------------------------------------------------------------------
 
--- recursive function evaluating program
+-- recursive function processing code
 run :: Runtime -> IO ()
 run runtime = 
     if not . getIsRunning $ runtime
@@ -274,6 +279,7 @@ run runtime =
             then run $ moveIP (setProcessingMode ModeInstructions runtime)
             else run $ moveIP (setStacks (pushValues [ord char] (getStacks runtime)) runtime)
 
+-- moves IP according to it's direction
 moveIP :: Runtime -> Runtime
 moveIP runtime =
     let (codemap, width, height) = getCode runtime
@@ -480,7 +486,9 @@ execInstr WriteToCode runtime = popNValuesAndExec 3 (\[row,column,v] stacks ->
 execInstr Terminate runtime = setIsRunning False runtime
 
 
--- Helper functions
+----- Helper functions -----
+
+-- pops from stack and handles possible error (poping empty stack)
 popNValuesAndExec :: Int -> ([Value] -> Stacks -> Runtime) -> Runtime -> Runtime
 popNValuesAndExec n f runtime = case popNValues n (getStacks runtime) of
     Just (xx, stacks) -> f xx stacks
@@ -489,15 +497,17 @@ popNValuesAndExec n f runtime = case popNValues n (getStacks runtime) of
 printErrorAndExit :: Runtime -> Runtime
 printErrorAndExit runtime = setIOoperation (\r -> do putStr errorMessage >> debug "" >> return r) (setIsRunning False runtime)
 
+-- pops Value from stack and outputs to a stdout
 outputValue :: (Value -> String) -> Runtime -> Runtime
 outputValue f runtime = popNValuesAndExec 1 (\[x] stacks -> setIOoperation (\r -> do putStr (f x) >> debug "" >> return r) (setStacks stacks runtime)) runtime
 
 editCharInCode :: Int -> Int -> Char -> Code -> Code
 editCharInCode row column ch (codemap, width, height) = 
-    let (newWidth, newHeight) = (max width column+1, max height row+1) in
+    let (newWidth, newHeight) = (max width (column + 1), max height (row + 1)) in
     let newcodemap = (map (extendLines newWidth) codemap) ++ (addLines (newHeight - height) newWidth) in --possible extending of codemap
     (replaceAtPos row (replaceAtPos column ch (newcodemap !! row)) newcodemap, newWidth, newHeight)
 
+-- replaces element at certain position (index) in array
 replaceAtPos :: Int -> a -> [a] -> [a]
 replaceAtPos 0 v (x:xx) = v : xx
 replaceAtPos n v (x:xx) = x : replaceAtPos (n-1) v xx
