@@ -11,7 +11,7 @@ foreign import ccall unsafe "conio.h getch"
 -------
 
 debugMode :: Bool
-debugMode = False -- enables debugging output
+debugMode = True -- enables debugging output
 
 type Line = [Char]
 type CodeMap = [Line]
@@ -35,12 +35,12 @@ instance Show Dir where
         DirRight   -> ">"
         DirLeft   -> "<"
 
--- Instruction Pointer
+-- Instruction Pointer, row column direction
 data IP = IP Int Int Dir
     deriving Eq
 
 instance Show IP where
-    show (IP a b dir) = "[" ++ (show a) ++ "," ++ (show b) ++ "," ++ (show dir) ++ "]"
+    show (IP row column dir) = "[" ++ (show column) ++ "," ++ (show row) ++ "," ++ (show dir) ++ "]"
 
 data Instruction = 
     NOP
@@ -202,7 +202,8 @@ errorMessage = "something smells fishy..."
 debug :: String -> IO ()
 debug str = 
     if debugMode 
-    then (if not . null $ str then putStr "[DEBUG] " else return ()) >> putStrLn str 
+    then (if not . null $ str then putStr "[DEBUG] " else return ()) -- prefix "[DEBUG] " only when str is not empty 
+        >> putStrLn str
     else return ()
 
 main :: IO ()
@@ -259,20 +260,21 @@ run runtime =
         if pm == ModeInstructions
         then do
             let maybe_instr = getInstruction runtime
-            rN0_3 <- getStdRandom (randomR (0, 3))
-            let runtime1 = setRandNum0_3 rN0_3 runtime
             case maybe_instr of
-                Nothing    -> run $ moveIP runtime1
+                Nothing    -> run $ moveIP runtime
                 Just instr ->
-                    if not . getIgnoreNextInstruction $ runtime1
+                    if not . getIgnoreNextInstruction $ runtime
                     then do
+                        rN0_3 <- getStdRandom (randomR (0, 3)) -- prepare rand num in case needed
+                        let runtime1 = setRandNum0_3 rN0_3 runtime
+
                         if instr /= NOP then debug $ (show $ getIP runtime1) ++ " Executing " ++ (show instr) else return ()
                         let runtime2 = execInstr instr runtime1
                         runtime3 <- executeIOoperation runtime2
-                        run $ moveIP . (setIOoperation (\r -> return r)) $ runtime3
+                        run $ moveIP . (setIOoperation return) $ runtime3
                     else do
-                        debug $ (show $ getIP runtime1) ++ " Ignoring " ++ (show instr)
-                        run $ moveIP (setIgnoreNextInstruction False runtime1)
+                        debug $ (show $ getIP runtime) ++ " Ignoring " ++ (show instr)
+                        run $ moveIP (setIgnoreNextInstruction False runtime)
         else do
             let char = getCharAtPos (getCode runtime) (getIP runtime)
             if (char == '\'' && pm == ModeCharReadingSingle) || (char == '\"' && pm == ModeCharReadingDouble)
